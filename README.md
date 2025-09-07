@@ -1,5 +1,10 @@
 # Buckshot Roulette – Chat Version
 
+<!-- README 최상단 배너 이미지 -->
+<p align="center">
+  <img src="./main_image.png" alt="Buckshot Roulette Banner" />
+</p>
+
 Gradio + OpenAI로 만든 **버튼/채팅 기반 버크샷 룰렛**.  
 라운드, 탄창 섞기, 아이템(돋보기/수갑/담배), 수갑 스킵, 턴 유지 규칙까지 구현.
 
