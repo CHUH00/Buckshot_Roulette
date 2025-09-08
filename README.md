@@ -46,3 +46,7 @@ Gradio + OpenAI(gpt-4o-mini)로 만든 **버튼/채팅 기반 버크샷 룰렛**
 <p align="center">
   <img src="./image/main_2.png" alt="Buckshot Roulette main_2" />
 </p>
+
+<p align="center">
+  <img src="./image/main_3.png" alt="Buckshot Roulette main_3" />
+</p>
