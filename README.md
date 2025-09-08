@@ -1,6 +1,5 @@
 # Buckshot Roulette – Chat Version
 
-<!-- README 최상단 배너 이미지 -->
 <p align="center">
   <img src="./main_image.png" alt="Buckshot Roulette Banner" />
 </p>
@@ -21,3 +20,12 @@ Gradio + OpenAI로 만든 **버튼/채팅 기반 버크샷 룰렛**.
 - 하단 **게임 로그**에 전체 진행 기록
 
 ---
+
+## 실행 화면
+<p align="center">
+  <img src="./image/main_1.png" alt="Buckshot Roulette main_1" />
+</p>
+
+<p align="center">
+  <img src="./image/main_2.png" alt="Buckshot Roulette main_2" />
+</p>
