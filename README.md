@@ -6,6 +6,8 @@
 
 - 출처: https://store.steampowered.com/app/2835570/Buckshot_Roulette/?l=koreana
 
+---
+
 Gradio + OpenAI로 만든 **버튼/채팅 기반 버크샷 룰렛**.  
 라운드, 탄창 섞기, 아이템(돋보기/수갑/담배), 벅샷 룰렛 규칙까지 구현.
 
