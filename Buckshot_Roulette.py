@@ -172,9 +172,18 @@ def apply_action(state:GameState,actor:str,action:str):
 
     if action=="use_peek":
         if have(actor,"peek"):
-            state.known_next=state.magazine[0] if state.magazine else None
+            state.known_next = state.magazine[0] if state.magazine else None
             consume(actor,"peek")
-            state.log.append("🧪 당신 돋보기 사용" if actor=="human" else "🧪 딜러 돋보기 사용 (결과 비공개)")
+            if actor == "human":
+                if state.known_next is None:
+                    state.log.append("🧪 당신 돋보기 사용 → 탄창이 비어 있습니다.")
+                    keep = True
+                else:
+                    human_readable = "실탄" if state.known_next == "live" else "공탄"
+                    state.log.append(f"🧪 당신 돋보기 사용 → 다음 탄: {human_readable}")
+                    keep = True
+            else:
+                state.log.append("🧪 딜러 돋보기 사용 (결과 비공개)")
             keep = True
         else:
             state.log.append("⚠️ 돋보기 없음")
