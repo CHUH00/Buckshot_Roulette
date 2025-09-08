@@ -6,6 +6,8 @@ import gradio as gr
 from openai import OpenAI
 from dotenv import load_dotenv
 
+import time
+
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 OPENAI_MODEL = "gpt-4o-mini"
@@ -239,7 +241,7 @@ def apply_action(state:GameState,actor:str,action:str):
             else:
                 state.log.append(f"🔫 {actor_label(actor)}{part} {('자신' if tgt==actor else '상대')} → ✨ 공탄")
 
-            keep = (tgt == actor and not hit)
+            keep = (action == "shoot_self" and not hit)
 
     resolve_next_turn(state, actor, keep)
     state.last_action=action
@@ -280,25 +282,58 @@ def chat_with_dealer(state_json:str,history:list,user_msg:str):
     cmd = normalize_cmd(user_msg)
     action = ACTION_MAP.get(cmd)
 
+    # 편의: 현재 상태를 한번에 내보내는 헬퍼
+    def emit(curr_history):
+        yield (
+            curr_history,
+            json.dumps(asdict(state),ensure_ascii=False),
+            render_log(state)
+        )
+
     if action:
-        history=history+[[user_msg,""]]
-        state=apply_action(state,"human",action)
+        # 1) 플레이어 액션 적용
+        history = history + [[user_msg,""]]
+        state = apply_action(state, "human", action)
 
-        cnt=0
-        while state.turn=="ai" and cnt<10 and not check_end(state):
-            a,r=decide_ai_action(state)
+        # 화면에 즉시 반영
+        curr = history[:-1] + [[user_msg, "\n".join(state.log[-3:])]]
+        yield from emit(curr)
+        time.sleep(1)
+
+        # 2) 딜러 턴을 단계별로 스트리밍
+        cnt = 0
+        while state.turn == "ai" and cnt < 10 and not check_end(state):
+            # (a) 딜러 선택 로그만 먼저 보여주기
+            a, r = decide_ai_action(state)
             state.log.append(f"🤖 딜러 선택: {a} ({r})")
-            state=apply_action(state,"ai",a)
-            cnt+=1
+            curr = history[:-1] + [[user_msg, "\n".join(state.log[-3:])]]
+            yield from emit(curr)
+            time.sleep(1)
 
-        end=check_end(state)
-        if end: state.log.append(f"🏁 {end}")
+            # (b) 실제 딜러 액션 적용 결과 보여주기
+            state = apply_action(state, "ai", a)
+            curr = history[:-1] + [[user_msg, "\n".join(state.log[-3:])]]
+            yield from emit(curr)
+            time.sleep(1)
 
-        return history[:-1]+[[user_msg,"\n".join(state.log[-3:])]], json.dumps(asdict(state),ensure_ascii=False), render_log(state)
+            cnt += 1
+
+        # 3) 종료라면 결과도 한 번 더 보여주기
+        end = check_end(state)
+        if end:
+            state.log.append(f"🏁 {end}")
+            curr = history[:-1] + [[user_msg, "\n".join(state.log[-3:])]]
+            yield from emit(curr)
 
     else:
-        reply=dealer_chat(state,history,user_msg)
-        return history+[[user_msg,reply]], json.dumps(asdict(state),ensure_ascii=False), render_log(state)
+        # 일반 대화는 스트리밍 불필요하면 한 번만 내보내도 됨
+        reply = dealer_chat(state, history, user_msg)
+        history = history + [[user_msg, reply]]
+        yield (
+            history,
+            json.dumps(asdict(state),ensure_ascii=False),
+            render_log(state)
+        )
 
 def next_round(state_json:str, history:list):
     state = GameState(**json.loads(state_json))
@@ -365,12 +400,24 @@ with gr.Blocks(css=css_bg) as demo:
     gr.Markdown("# 🔫 Buckshot Roulette - Chat Version")
     gr.Markdown(
         """
-        **사용법**
-        - 게임 시작/리셋으로 라운드 시작 (HP 4, 당신 선공)
-        - 사격: `상대에게 쏘기`, `나에게 쏘기` (자연어도 인식)
-        - 아이템: `돋보기`, `수갑`, `담배` (아이템은 무료 액션, 턴 유지)
-        - 사격 규칙: 자기에게 쐈고 공탄이면 턴 유지
-        - 다음 라운드: 탄 소모/전투 종료 후 누르기
+            **사용법**
+            - 게임 시작/리셋으로 라운드 시작 (HP 4, 당신 선공)
+            - 사격: `상대에게 쏘기`, `나에게 쏘기` (자연어도 인식)
+                - 샷건을 사용할 때는 당신 또는 상대에게 사격을 선택할 수 있다.
+                - 실탄을 맞으면, 맞은 쪽의 체력이 1 감소한다.
+                - 공포탄(Blank shell)을 상대에게 쏘면, 턴이 상대방에게 넘어간다.
+                - 공포탄을 자신에게 쏘면, 턴이 유지되어 한 번 더 행동할 수 있다.
+            - 아이템: `돋보기`, `수갑`, `담배` (아이템은 무료 액션, 턴 유지)
+                -	🔍 돋보기
+                    - 다음에 발사될 탄이 실탄인지 공탄인지 확인할 수 있다.
+                    - 무료 행동이라 사용해도 턴이 넘어가지 않는다.
+                -	🔗 수갑
+                    - 상대방의 다음 턴을 강제로 스킵시킨다.
+                    - 사용하면 바로 효과가 발동되고, 상대 차례가 건너뛰어진다.
+                -	🚬 담배
+                    - 자신의 체력을 1 회복한다. (최대 HP 4를 넘을 수 없음)
+                    - 역시 무료 행동이라 턴을 소비하지 않는다.
+            - 다음 라운드: 탄 소모/전투 종료 후 누르기
         """
     )
     with gr.Row():
