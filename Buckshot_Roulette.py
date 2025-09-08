@@ -1,4 +1,4 @@
-import os, json, random, re, unicodedata
+import os, json, random, re, unicodedata, base64
 from dataclasses import dataclass, asdict
 from typing import List, Dict, Optional
 
@@ -6,7 +6,6 @@ import gradio as gr
 from openai import OpenAI
 from dotenv import load_dotenv
 
-# ---------------------- 환경설정 ----------------------
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 OPENAI_MODEL = "gpt-4o-mini"
@@ -22,7 +21,6 @@ ACTION_MAP = {
     "상대에게 쏘기": "shoot_opponent",
 }
 
-# ---------------------- 데이터 구조 ----------------------
 @dataclass
 class Item:
     key: str
@@ -48,27 +46,22 @@ class GameState:
     last_action: Optional[str]
     cuffed: Optional[str]
 
-# ---------------------- 유틸 ----------------------
 def pretty_items(items: Dict[str,int]) -> str:
     return ", ".join([f"{ITEMS_CATALOG[k].name} x{v}" for k,v in items.items() if v>0]) or "없음"
 
 def has_final_consonant(kor_word: str) -> bool:
-    # 마지막 글자 한글 여부 체크 후 종성 유무 판단
     if not kor_word:
         return False
     ch = kor_word[-1]
     code = ord(ch)
     if 0xAC00 <= code <= 0xD7A3:
-        jong = (code - 0xAC00) % 28
-        return jong != 0
-    # 한글이 아니면 대충 '는' 처리
+        return ((code - 0xAC00) % 28) != 0
     return False
 
-def topic_particle(label: str) -> str:  # '은/는'
+def topic_particle(label: str) -> str:
     return "은" if has_final_consonant(label) else "는"
 
-def subject_particle(actor: str) -> str:  # '이/가' (사격 로그용)
-    # '당신(받침 있음: ㄴ)→이', '딜러(받침 없음)→가' 맞춤
+def subject_particle(actor: str) -> str:
     lab = actor_label(actor)
     return "이" if has_final_consonant(lab) else "가"
 
@@ -96,14 +89,7 @@ def check_end(state: GameState):
 def render_log(state: GameState) -> str:
     return "\n".join(state.log)
 
-# ---------------------- 라운드 생성 ----------------------
 def new_round(prev:Optional[GameState]=None):
-    """
-    매 라운드:
-    - HP 전부 4로 리셋
-    - 플레이어 선공
-    - 탄창/아이템 재지급
-    """
     rnd = 1 if prev is None else prev.round+1
     total, live = random.randint(6,8), random.randint(2,4)
     blanks = total-live
@@ -113,21 +99,19 @@ def new_round(prev:Optional[GameState]=None):
 
     state = GameState(
         round=rnd,
-        turn="human",                       # 라운드 시작은 항상 플레이어
+        turn="human",
         log=[f"🎲 라운드 {rnd} 시작! 총 {total}발 (실탄 {live}, 공탄 {blanks})"],
-        human_hp=MAX_HEALTH,                # 매 라운드 HP 리셋
+        human_hp=MAX_HEALTH,
         ai_hp=MAX_HEALTH,
         magazine=mag, known_next=None,
         human_items=roll(), ai_items=roll(),
         last_action=None,
         cuffed=None
     )
-    # 시작 안내
     state.log.append(f"🎁 당신 아이템: {pretty_items(state.human_items)}")
     state.log.append(f"🎁 딜러 아이템: {pretty_items(state.ai_items)}")
     return state
 
-# ---------------------- AI ----------------------
 AI_SYSTEM_PROMPT = """당신은 이 게임의 딜러 AI입니다.
 다음 중 하나만 JSON으로 답하세요:
 ["shoot_self","shoot_opponent","use_peek","use_cuffs","use_heal"]
@@ -164,7 +148,6 @@ def dealer_chat(state:GameState,history:list,user_msg:str):
     prompt=f"{public}\n{conv}\n[플레이어] {user_msg}\n[딜러]"
     return call_openai(CHAT_SYSTEM_PROMPT,prompt)
 
-# ---------------------- 턴 계산(수갑 포함) ----------------------
 def resolve_next_turn(state: GameState, actor: str, keep: bool) -> None:
     opp = "ai" if actor=="human" else "human"
     if keep:
@@ -178,10 +161,9 @@ def resolve_next_turn(state: GameState, actor: str, keep: bool) -> None:
         next_turn = actor
     state.turn = next_turn
 
-# ---------------------- 액션 ----------------------
 def apply_action(state:GameState,actor:str,action:str):
     opp="ai" if actor=="human" else "human"
-    keep=False  # 기본은 턴 넘김. 조건에 따라 유지.
+    keep=False
 
     def have(side,k): return (state.human_items if side=="human" else state.ai_items)[k]>0
     def consume(side,k):
@@ -193,7 +175,7 @@ def apply_action(state:GameState,actor:str,action:str):
             state.known_next=state.magazine[0] if state.magazine else None
             consume(actor,"peek")
             state.log.append("🧪 당신 돋보기 사용" if actor=="human" else "🧪 딜러 돋보기 사용 (결과 비공개)")
-            keep = True  # ★ 아이템은 무료 액션 → 턴 유지
+            keep = True
         else:
             state.log.append("⚠️ 돋보기 없음")
             keep = True
@@ -202,9 +184,9 @@ def apply_action(state:GameState,actor:str,action:str):
         if have(actor,"cuffs"):
             if state.cuffed is None:
                 consume(actor,"cuffs")
-                state.cuffed = opp  # 상대의 '다음' 턴 1회 스킵 예약
+                state.cuffed = opp
                 state.log.append(f"⛓️ {actor_label(actor)} 수갑 사용")
-                keep = True  # ★ 아이템은 무료 액션 → 턴 유지
+                keep = True
             else:
                 state.log.append("⚠️ 이미 수갑 효과가 대기중")
                 keep = True
@@ -222,7 +204,7 @@ def apply_action(state:GameState,actor:str,action:str):
                 state.ai_hp=after
             consume(actor,"heal")
             state.log.append(f"🚬 {actor_label(actor)} 체력 {before}→{after}")
-            keep = True  # ★ 아이템은 무료 액션 → 턴 유지
+            keep = True
         else:
             state.log.append("⚠️ 담배 없음")
             keep = True
@@ -248,15 +230,12 @@ def apply_action(state:GameState,actor:str,action:str):
             else:
                 state.log.append(f"🔫 {actor_label(actor)}{part} {('자신' if tgt==actor else '상대')} → ✨ 공탄")
 
-            # 원작 규칙: "자기에게 쐈고, 공탄"이면 턴 유지
             keep = (tgt == actor and not hit)
 
-    # 턴 결정(수갑 포함)
     resolve_next_turn(state, actor, keep)
     state.last_action=action
     return state
 
-# ---------------------- 채팅 엔진 ----------------------
 def normalize_cmd(s: str) -> str:
     if not s:
         return s
@@ -296,7 +275,6 @@ def chat_with_dealer(state_json:str,history:list,user_msg:str):
         history=history+[[user_msg,""]]
         state=apply_action(state,"human",action)
 
-        # AI 턴 루프
         cnt=0
         while state.turn=="ai" and cnt<10 and not check_end(state):
             a,r=decide_ai_action(state)
@@ -313,10 +291,8 @@ def chat_with_dealer(state_json:str,history:list,user_msg:str):
         reply=dealer_chat(state,history,user_msg)
         return history+[[user_msg,reply]], json.dumps(asdict(state),ensure_ascii=False), render_log(state)
 
-# ---------------------- 라운드 진행(버튼용) ----------------------
 def next_round(state_json:str, history:list):
     state = GameState(**json.loads(state_json))
-    # 아직 라운드 중이면 막기
     if state.magazine and not check_end(state):
         state.log.append("⚠️ 아직 라운드 진행 중입니다. 탄을 모두 소모하거나 누군가 쓰러지면 다음 라운드로 이동하세요.")
         return history, json.dumps(asdict(state),ensure_ascii=False), render_log(state)
@@ -330,39 +306,70 @@ def next_round(state_json:str, history:list):
     history = history + [["", f"라운드 {new_state.round} 시작! (HP 4/4, 선공: 당신)"]]
     return history, json.dumps(asdict(new_state),ensure_ascii=False), render_log(new_state)
 
-# ---------------------- 시작 ----------------------
 def start_game():
     s=new_round()
     s.log.append("🤖 딜러: GPT-4o-mini 준비됨")
     hist=[["","게임 시작! 행동을 채팅으로 입력하거나 버튼을 눌러보세요."]]
     return json.dumps(asdict(s),ensure_ascii=False), hist, render_log(s)
 
-# ---------------------- UI ----------------------
-with gr.Blocks() as demo:
+def bg_css_from_png(png_path: str) -> str:
+    with open(png_path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode("ascii")
+    return f"""
+    /* 배경 이미지 */
+    #game_chat,
+    #game_chat .gr-chatbot,
+    #game_chat .overflow-y-auto {{
+        background-image: url("data:image/png;base64,{b64}");
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+        background-color: transparent !important;
+    }}
+
+    /* 버블을 투명하게 둔 상태 유지 */
+    #game_chat * {{
+        background-color: transparent !important;
+    }}
+
+    /* ====== 글자색(말풍선/시스템 텍스트) ====== */
+    #game_chat,
+    #game_chat * {{
+        color: #ffffff !important;
+    }}
+    /* 링크 색상(선택) */
+    #game_chat a {{ color: #8ab4ff !important; }}
+
+    /* 가독성 향상(얇은 그림자) */
+    #game_chat .message *,
+    #game_chat .prose *,
+    #game_chat .markdown-body * {{
+        text-shadow: 0 1px 1px rgba(0,0,0,.55);
+    }}
+    """
+
+here = os.path.dirname(os.path.abspath(__file__))
+img_path = os.path.join(here, "main_image.png")
+css_bg = bg_css_from_png(img_path)
+
+with gr.Blocks(css=css_bg) as demo:
     gr.Markdown("# 🔫 Buckshot Roulette - Chat Version")
     gr.Markdown(
         """
-            **간단 사용법**
-            - **게임 시작/리셋** 버튼으로 라운드를 시작합니다. (HP 4로 리셋, 당신 선공)
-            - 행동은 **버튼 클릭** 또는 **채팅 입력**으로 합니다.
-            - 사격: `상대에게 쏘기`, `나에게 쏘기`  *(자연어도 인식: “너한테 쏘기”, “나한테 쏘기” 등)*
-            - 아이템: `돋보기`, `수갑`, `담배`
-            - **아이템은 무료 액션**입니다. 사용해도 **당신 턴이 유지**됩니다.
-            - 수갑: 상대의 **다음 턴 1회 스킵** 예약
-            - 돋보기: 다음 탄 정보 확인(딜러는 비공개)
-            - 담배: HP +1 (최대 4)
-            - **사격 규칙**: 기본은 사격 후 턴 교대. 단, **자기에게 쐈는데 공탄**이면 **턴 유지**.
-            - **다음 라운드** 버튼: 탄을 다 쓰거나 누가 쓰러지면 눌러서 새 라운드 시작.
-            - 아래 **🧾 게임 로그**에서 모든 진행 기록을 확인하세요.
+        **사용법**
+        - 게임 시작/리셋으로 라운드 시작 (HP 4, 당신 선공)
+        - 사격: `상대에게 쏘기`, `나에게 쏘기` (자연어도 인식)
+        - 아이템: `돋보기`, `수갑`, `담배` (아이템은 무료 액션, 턴 유지)
+        - 사격 규칙: 자기에게 쐈고 공탄이면 턴 유지
+        - 다음 라운드: 탄 소모/전투 종료 후 누르기
         """
     )
-    
     with gr.Row():
         start_btn=gr.Button("게임 시작/리셋")
         next_btn=gr.Button("다음 라운드")
 
     state_store=gr.State("")
-    chatbot=gr.Chatbot(height=360)
+    chatbot=gr.Chatbot(height=360, elem_id="game_chat")
 
     with gr.Row():
         btn_self=gr.Button("나에게 쏘기")
@@ -377,17 +384,14 @@ with gr.Blocks() as demo:
     gr.Markdown("## 🧾 게임 로그")
     log_box = gr.Textbox(label="게임 로그", lines=16, interactive=False)
 
-    # 초기화 / 다음 라운드
     start_btn.click(start_game,inputs=[],outputs=[state_store,chatbot,log_box])
     next_btn.click(next_round, inputs=[state_store,chatbot], outputs=[chatbot,state_store,log_box])
 
-    # 버튼 → 채팅
     for b,txt in [(btn_self,"나에게 쏘기"),(btn_opp,"상대에게 쏘기"),(btn_peek,"돋보기"),(btn_cuffs,"수갑"),(btn_heal,"담배")]:
         b.click(chat_with_dealer,inputs=[state_store,chatbot,gr.State(txt)],outputs=[chatbot,state_store,log_box])
 
-    # 채팅
     send_btn.click(chat_with_dealer,inputs=[state_store,chatbot,chat_in],outputs=[chatbot,state_store,log_box])
     chat_in.submit(chat_with_dealer,inputs=[state_store,chatbot,chat_in],outputs=[chatbot,state_store,log_box])
 
-if __name__=="__main__":
-    demo.launch(share=True)
+
+demo.launch(share=True)
