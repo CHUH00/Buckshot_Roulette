@@ -282,7 +282,6 @@ def chat_with_dealer(state_json:str,history:list,user_msg:str):
     cmd = normalize_cmd(user_msg)
     action = ACTION_MAP.get(cmd)
 
-    # 편의: 현재 상태를 한번에 내보내는 헬퍼
     def emit(curr_history):
         yield (
             curr_history,
@@ -291,26 +290,21 @@ def chat_with_dealer(state_json:str,history:list,user_msg:str):
         )
 
     if action:
-        # 1) 플레이어 액션 적용
         history = history + [[user_msg,""]]
         state = apply_action(state, "human", action)
 
-        # 화면에 즉시 반영
         curr = history[:-1] + [[user_msg, "\n".join(state.log[-3:])]]
         yield from emit(curr)
         time.sleep(1)
 
-        # 2) 딜러 턴을 단계별로 스트리밍
         cnt = 0
         while state.turn == "ai" and cnt < 10 and not check_end(state):
-            # (a) 딜러 선택 로그만 먼저 보여주기
             a, r = decide_ai_action(state)
             state.log.append(f"🤖 딜러 선택: {a} ({r})")
             curr = history[:-1] + [[user_msg, "\n".join(state.log[-3:])]]
             yield from emit(curr)
             time.sleep(1)
 
-            # (b) 실제 딜러 액션 적용 결과 보여주기
             state = apply_action(state, "ai", a)
             curr = history[:-1] + [[user_msg, "\n".join(state.log[-3:])]]
             yield from emit(curr)
@@ -318,7 +312,6 @@ def chat_with_dealer(state_json:str,history:list,user_msg:str):
 
             cnt += 1
 
-        # 3) 종료라면 결과도 한 번 더 보여주기
         end = check_end(state)
         if end:
             state.log.append(f"🏁 {end}")
@@ -326,7 +319,6 @@ def chat_with_dealer(state_json:str,history:list,user_msg:str):
             yield from emit(curr)
 
     else:
-        # 일반 대화는 스트리밍 불필요하면 한 번만 내보내도 됨
         reply = dealer_chat(state, history, user_msg)
         history = history + [[user_msg, reply]]
         yield (
@@ -360,7 +352,6 @@ def bg_css_from_png(png_path: str) -> str:
     with open(png_path, "rb") as f:
         b64 = base64.b64encode(f.read()).decode("ascii")
     return f"""
-    /* 배경 이미지 */
     #game_chat,
     #game_chat .gr-chatbot,
     #game_chat .overflow-y-auto {{
@@ -371,20 +362,16 @@ def bg_css_from_png(png_path: str) -> str:
         background-color: transparent !important;
     }}
 
-    /* 버블을 투명하게 둔 상태 유지 */
     #game_chat * {{
         background-color: transparent !important;
     }}
 
-    /* ====== 글자색(말풍선/시스템 텍스트) ====== */
     #game_chat,
     #game_chat * {{
         color: #ffffff !important;
     }}
-    /* 링크 색상(선택) */
     #game_chat a {{ color: #8ab4ff !important; }}
 
-    /* 가독성 향상(얇은 그림자) */
     #game_chat .message *,
     #game_chat .prose *,
     #game_chat .markdown-body * {{
